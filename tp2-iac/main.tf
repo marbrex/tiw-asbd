@@ -59,7 +59,7 @@ resource "openstack_compute_instance_v2" "vm-front" {
   }
 
   network {
-    name = "asbd-subnet-front"
+    name = "network-asbd-edgerunner"
   }
 }
 
@@ -81,7 +81,7 @@ resource "openstack_compute_instance_v2" "vm-worker" {
   }
 
   network {
-    name = "asbd-subnet-worker"
+    name = "network-asbd-edgerunner"
   }
 }
 
@@ -98,6 +98,6 @@ resource "openstack_compute_instance_v2" "vm-db" {
   }
 
   network {
-    name = "asbd-subnet-db"
+    name = "network-asbd-edgerunner"
   }
 }
