@@ -55,7 +55,7 @@ resource "openstack_compute_instance_v2" "vm-front" {
   security_groups = ["default"]
 
   metadata = {
-    machine_type = front
+    machine_type = "front"
   }
 
   network {
@@ -77,7 +77,7 @@ resource "openstack_compute_instance_v2" "vm-worker" {
   security_groups = ["default"]
 
   metadata = {
-    machine_type = worker
+    machine_type = "worker"
   }
 
   network {
@@ -94,7 +94,7 @@ resource "openstack_compute_instance_v2" "vm-db" {
   security_groups = ["default"]
 
   metadata = {
-    machine_type = db
+    machine_type = "db"
   }
 
   network {
