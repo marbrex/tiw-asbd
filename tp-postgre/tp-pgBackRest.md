@@ -9,6 +9,8 @@ aliases: ["TP2", "TP2 sur la restauration de données"]
 > Eldar Kasmamytov p1712650
 > (Je suis en monôme)
 
+<br/>
+
 ## I. Installation
 ---
 
@@ -63,6 +65,7 @@ SELECT COUNT(*) FROM pgbench_accounts;
 On obtient le nombre de lignes créées dans les tables :  
 - `pgbench_tellers` = **100**
 - `pgbench_accounts` = **1 000 000**
+<br/>
 <br/>
 
 ## III. Restauration
@@ -318,7 +321,7 @@ Par conséquent, il est possible de se contenter par le comportement par défaut
 sudo pg_ctlcluster 15 main stop
 ```
 
-2) Supprimer tous les anciens fichiers dans le répértoire de données :  
+2) Supprimer tous les anciens fichiers dans le répertoire de données :  
 ```bash
 sudo -u postgres find /var/lib/postgresql/15/main -mindepth 1 -delete
 ```
@@ -370,7 +373,9 @@ sudo pg_ctlcluster 15 main start
 #### 3.6.3 Point-In-Time-Recovery
 
 > 🤔 <span style="color: #8357e9; font-weight: bold;">Question:</span> Que signifie PITR ?
-> 💡 <span style="color: #8357e9; font-weight: bold;">Réponse:</span> **P**oint **I**n **T**ime **R**ecovery, ou PITR, est un mécanisme permettant de restaurer un état de la base dans lequel elle était à un moment précis dans le temps, par exemple avec un Timestamp.  
+> 💡 <span style="color: #8357e9; font-weight: bold;">Réponse:</span> **P**oint **I**n **T**ime **R**ecovery, ou PITR, est un mécanisme permettant de restaurer un état de la base dans lequel elle était à un moment précis dans le temps, cela se fait avec un Timestamp.  
+> Cf. La [documentation PostgreSQL sur le PITR](https://www.postgresql.org/docs/15/continuous-archiving.html)  
+> La [documentation pgBackRest sur PITR](https://pgbackrest.org/user-guide.html#pitr)
 
 1) On récupère le Timestamp désiré, càd celui de notre sauvegarde incrémentale :  
 ```bash
@@ -386,7 +391,12 @@ SELECT '2023-03-05 13:44:33'::timestamp AT TIME ZONE 'Europe/Paris';
 
 Ce qui nous retourne **Timezone = 2023-03-05 13:44:33+01**, que l'on pourra ensuite utiliser pour restaurer les données :  
 
-3) Restaurer :  
+3) Arrêter le cluster PostgreSQL :  
+```bash
+sudo pg_ctlcluster 15 main stop
+```
+
+4) Restaurer :  
 ```bash
 sudo -u postgres \
 pgbackrest --stanza=main --delta \
@@ -394,7 +404,7 @@ pgbackrest --stanza=main --delta \
   --target-action=promote restore
 ```
 
-4) Démarrer le cluster PostgreSQL :  
+5) Démarrer le cluster PostgreSQL :  
 ```bash
 sudo pg_ctlcluster 15 main start
 ```
@@ -477,4 +487,141 @@ SELECT COUNT(*) FROM pgbench_accounts; -- retourne Count = 1 000 000
 
 ## IV. Retrouver une erreur dans des WALs
 ---
+
+**But:** Nous allons “ouvrir” les WALs pour voir ce qu’il y a dedans.
+
+> 🤔 <span style="color: #8357e9; font-weight: bold;">Question:</span> Que signifie WAL ?
+> 💡 <span style="color: #8357e9; font-weight: bold;">Réponse:</span> D'après la [documentation officielle](https://www.postgresql.org/docs/current/wal-intro.html) de **PostgreSQL**, **W**rite-**A**head **L**ogging, ou WAL, est un mécanisme permettant de "replay" ou "reproduire" tous les chagements écrits dans ces logs, par exemple dans une situation d'un crush. L'idée principale est que les changements doivent être loggués avant d'être écrits dans les data files. Ainsi, tout changement pas enregistré dans les "data pages" peut être reproduit depuis les logs.
+
+Pour corser un peu les choses, assurez vous de simuler des transactions en utilisant `pgbench` ainsi :  
+```bash
+while :; do pgbench -c 4 -j 1 -T 60 benchdb; sleep 1; done
+```
+
+Si l'execution de cette commande affiche l'erreur suivante :  
+```log
+ERROR: cannot execute VACUUM during recovery
+```
+
+Désactiver le mode 'recovery' (dans la console `psql`) :  
+```sql
+SELECT pg_is_in_recovery(); -- Retourne True
+SELECT pg_promote(); -- Retourne True
+SELECT pg_is_in_recovery(); -- Retourne False
+```
+
+Ensuite, nous allons faire “la boulette” en supprimant les lignes de `pgbench_accounts` pour lesquelles la colonne `bid` vaut 2.  
+```sql
+DELETE FROM pgbench_accounts WHERE bid=2;
+```
+
+Avant d’aller regarder les WALs, vous aurez besoin de pouvoir identifier la table avec son oid ainsi que le tablespace et la base de données. Voici la requête permettant de récupérer ces données :  
+```sql
+SELECT
+  coalesce(tbs.oid, db.dattablespace) AS tablespace,
+  db.oid AS database,
+  t.relfilenode AS table
+FROM pg_class t LEFT OUTER JOIN pg_tablespace tbs
+  on t.reltablespace=tbs.oid
+  CROSS JOIN pg_database db
+WHERE t.relname='pgbench_accounts'
+  AND db.datname=current_database();
+```
+
+Cette requête retourne :  
+
+| tablespace | database | table |
+| --- | --- | --- |
+| 1663 | 16388 | 16401 |
+
+> 🤔 <span style="color: #8357e9; font-weight: bold;">Question:</span> Quelle est la différence entre une sauvegarde physique et une sauvegarde logique ?
+> 💡 <span style="color: #8357e9; font-weight: bold;">Réponse:</span> La sauvegarde logique est une copie de la base de données sous forme d'un script SQL, tandis que la sauvegarde physique est une copie de tous les fichiers de la base, y compris les journaux de transactions.  
+> La sauvegarde logique est plus appropriée quand on a besoin de transférer des données de la base par exemple.
+
+> 🤔 <span style="color: #8357e9; font-weight: bold;">Question:</span> Pourquoi a-t-on besoin des WALs lors d’une sauvegarde physique ?
+> 💡 <span style="color: #8357e9; font-weight: bold;">Réponse:</span> La sauvegarde physique effectue une simple copie de tous les fichiers. Comme les WALs ne sont pas inclus dans les sauvegardes physique, on en a besoin pour garantir l'intégrité des données dans la base, car les changements validés depuis le dernier Full Backup ne seront pas inclus dans une sauvegarde physique.
+
+L’outil à utiliser pour regarder dans les WALs est pg_waldump (voir la [documentation](https://www.postgresql.org/docs/current/pgwaldump.html)).  
+
+Il ne reste plus qu’à comprendre la sortie de pg_waldump pour pouvoir isoler la requête qui a détruit des données pour trouver le point dans le temps auquel vous pouvez restaurer vos données en en perdant le moins possible.  
+
+Se connecter en tant que `root` :  
+```bash
+sudo su
+```
+
+Créer un répertoire temporaire pour les WAL :  
+```bash
+mkdir /tmp/wal
+cd /tmp/wal # se naviguer dans ce dossier
+```
+
+Maintenant, nous allons utiliser la [commande `archive-get`](https://pgbackrest.org/command.html#command-archive-get) de **pgBackRest** afin de récupérer des segments des archives WAL comme suit :  
+```bash
+pgbackrest --stanza=main \
+archive-get \
+/var/lib/pgbackrest/archive/main/15-1/0000000300000000/000000030000000000000014 \
+/tmp/wal/000000030000000000000014
+```
+
+L'éxécutable de `pg_waldump` n'est pas dans le `PATH`, on va donc spécifier le chemin complet vers le binaire. On peut afficher les logs WAL comme suit :  
+```bash
+/usr/lib/postgresql/15/bin/pg_waldump \
+/tmp/wal/000000030000000000000014
+```
+
+Lire plusieurs fichiers :  
+```bash
+/usr/lib/postgresql/15/bin/pg_waldump -p \
+/tmp/wal 00000003000000000000000C 000000030000000000000014
+```
+
+On va utiliser les numeros **tablespace / database / table** , pour filtrer le contenu avec `grep` :  
+```bash
+/usr/lib/postgresql/15/bin/pg_waldump -p \
+/tmp/wal 00000003000000000000000C 000000030000000000000014 \
+| grep DELETE | grep "rel 1663/16388/16401"
+```
+
+L'output de cette commande ressemble à ça :  
+![](Pasted%20image%2020230305183509.png)
+Ce qui nous intéresse ici, c'est le premier chiffre avant le `/` (le numéro de **fichier logique**) et les 2 chiffres après (le numéro de **fichier physique**). Ils nous indiquent où se trouve notre ségment.  
+
+Ainsi, le ségment est `000000030000000000000014`.  
+```bash
+/usr/lib/postgresql/15/bin/pg_waldump -p \
+/tmp/wal 000000030000000000000014 000000030000000000000014 \
+grep "DELETE\|COMMIT" > log.txt
+```
+
+Un extrait du contenu du fichier `log.txt`  :  
+![](Pasted%20image%2020230305184700.png)
+
+Il nous fait le dernier `COMMIT` avant les `DELETE`. On récupère son Timestamp pour effectuer la restauration (`2023-03-05 16:44:18.576103 CET`).  
+
+> ❕**Remarque:** Comme mentionné dans la **section 3.6.3 - PITR**, il est nécéssaire de formatter ce Timestamp pour pouvoir l'utilsier dans l'option `--target`. En suivant la même procédure, on obtient `2023-03-05 16:44:18.576103+01`.
+
+1) Arrêter le cluster PostgreSQL :  
+```bash
+sudo pg_ctlcluster 15 main stop
+```
+
+2) Réstaurer :  
+```bash
+sudo -u postgres \
+pgbackrest --stanza=main --delta \
+  --type=time "--target=2023-03-05 16:44:18.576103+01" \
+  --target-action=promote restore
+```
+
+3) Démarrer le cluster PostgreSQL :  
+```bash
+sudo pg_ctlcluster 15 main start
+```
+
+4) Vérifier la restauration :  
+```sql
+SELECT COUNT(*) FROM pgbench_accounts WHERE bid=2;
+```
+Ce qui nous retourne **Count = 100 000**
 
