@@ -584,7 +584,7 @@ On va utiliser les numeros **tablespace / database / table** , pour filtrer le c
 ```
 
 L'output de cette commande ressemble à ça :  
-![](Pasted%20image%2020230305183509.png)
+![](../assets/tp-pgBackRest-2.png)
 Ce qui nous intéresse ici, c'est le premier chiffre avant le `/` (le numéro de **fichier logique**) et les 2 chiffres après (le numéro de **fichier physique**). Ils nous indiquent où se trouve notre ségment.  
 
 Ainsi, le ségment est `000000030000000000000014`.  
@@ -595,7 +595,7 @@ grep "DELETE\|COMMIT" > log.txt
 ```
 
 Un extrait du contenu du fichier `log.txt`  :  
-![](Pasted%20image%2020230305184700.png)
+![](../assets/tp-pgBackRest-1.png)
 
 Il nous fait le dernier `COMMIT` avant les `DELETE`. On récupère son Timestamp pour effectuer la restauration (`2023-03-05 16:44:18.576103 CET`).  
 
